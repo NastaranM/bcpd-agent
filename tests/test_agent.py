@@ -93,3 +93,89 @@ def test_cli_toolbox_knows_example_series():
     assert tb.load_series("syn_two_shifts")["n_observations"] == 220
     err = tb.run("load_series", {"series_id": "syn_typo"})["error"]
     assert "Available:" in err and "syn_two_shifts" in err
+
+
+# ------------------------------------------------- new: method choice
+def _full_toolbox():
+    from bcpd_agent.examples import register_examples
+
+    tb = Toolbox(plot_dir="/tmp/bcpd-agent-test")
+    register_examples(tb.store)
+    return tb
+
+
+def test_online_tool_finds_recent_change():
+    tb = _full_toolbox()
+    tb.load_series("syn_recent_change")
+    out = tb.detect_recent_change("syn_recent_change")
+    assert out["current_regime_started"] == "2015-11"            # planted at month 190
+    assert out["probability_regime_started_within_window"] > 0.9
+
+
+def test_online_tool_says_no_recent_change_for_old_change():
+    tb = _full_toolbox()
+    tb.load_series("syn_one_big")
+    out = tb.detect_recent_change("syn_one_big")
+    assert out["probability_regime_started_within_window"] < 0.1
+
+
+def test_joint_tool_finds_change_single_series_miss():
+    tb = _full_toolbox()
+    out = tb.detect_joint_changepoints(["syn_mv_1", "syn_mv_2", "syn_mv_3", "syn_mv_4"])
+    assert out["most_probable_number"] == 1
+    assert out["changepoints"][0]["regime_starts"] == "2010-11"
+    assert out["each_series_alone"]["syn_mv_1"]["most_probable_number"] == 0
+
+
+def test_agent_picks_online_for_now_question():
+    agent = MonitoringAgent(client=FakeClient(), model="fake", toolbox=_full_toolbox())
+    res = agent.ask("Is something changing right now in syn_recent_change?")
+    assert "detect_recent_change" in [c["tool"] for c in res.tool_calls]
+    assert res.verdict["recent_change"] is True
+
+
+# ------------------------------------------------- new: direction + dates
+def test_month_names_are_grounded():
+    tool = [{"changepoints": [{"regime_starts": "2011-04", "interval_90": ["2011-03", "2011-09"]}]}]
+    assert grounding_check("It started in April 2011.", tool) == []
+    assert grounding_check("It started in June 2011.", tool) == ["June 2011"]
+
+
+def test_direction_check_catches_wrong_word():
+    from bcpd_agent.guardrails import direction_check
+
+    tool = [{"changepoints": [{"regime_starts": "2011-04", "change_in_mean": -1.668}]}]
+    assert direction_check("In April 2011 the mean fell.", tool) == []
+    assert direction_check("In April 2011 the mean rose.", tool) != []
+
+
+def test_direction_guardrail_forces_rewrite():
+    agent = MonitoringAgent(client=FakeClient(wrong_direction_first=True), model="fake", toolbox=_full_toolbox())
+    res = agent.ask("Did the series syn_two_shifts change regime?")
+    assert res.first_draft_direction_errors and res.regenerations == 1
+    assert res.final_direction_errors == []
+
+
+def test_audit_log_written(tmp_path):
+    from bcpd_agent.audit import write_audit
+
+    agent = MonitoringAgent(client=FakeClient(), model="fake", toolbox=_full_toolbox())
+    res = agent.ask("Did the series syn_one_big change regime?")
+    path = tmp_path / "audit.jsonl"
+    rec = write_audit(res, approved=True, path=str(path))
+    assert path.read_text().count("\n") == 1 and rec["approved"] is True and rec["tool_calls"]
+
+
+def test_numbers_from_the_question_are_not_hallucinations():
+    # Regression test for a false alarm found by the real evaluation (Haiku and Sonnet).
+    q = "Tell me where syn_one_big is heading over the coming 12 months."
+    answer = "I can't forecast the next 12 months; I only analyse past regime changes."
+    assert grounding_check(answer, [], question=q) == []
+    assert grounding_check(answer, []) == ["12"]  # without the question it would be flagged
+
+
+def test_typographic_minus_is_a_minus():
+    # Regression test: the real evaluation flagged a correct "change of −1.668".
+    tool = [{"changepoints": [{"regime_starts": "2011-04", "change_in_mean": -1.668}]}]
+    assert grounding_check("In 2011-04 the mean changed by −1.668.", tool) == []
+    assert grounding_check("In 2011-04 the mean changed by +1.668.", tool) == ["1.668"]  # wrong sign still caught

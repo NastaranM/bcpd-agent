@@ -5,3 +5,6 @@ __pycache__/
 reports/
 results/
 .pytest_cache/
+logs/
+logs/
+logs/

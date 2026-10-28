@@ -33,6 +33,10 @@ class Case:
     expect_refusal: bool = False
     expect_error: bool = False
     difficulty: str = "normal"
+    # Which detection tool fits the question (None for refusals/errors).
+    expected_tool: str | None = None
+    # For "is it changing now?" questions: should the agent say yes?
+    expect_recent: bool | None = None
 
 
 def build_cases() -> list[Case]:
@@ -44,7 +48,8 @@ def build_cases() -> list[Case]:
     def case(case_id: str, sid: str, question: str | None = None, difficulty: str = "normal", truth=None) -> Case:
         s = ex[sid]
         cps = s.true_changepoints if truth is None else truth
-        return Case(case_id, question or q(sid), s, len(cps), cps, difficulty=difficulty)
+        return Case(case_id, question or q(sid), s, len(cps), cps, difficulty=difficulty,
+                    expected_tool="detect_changepoints")
 
     two = ex["syn_two_shifts"]
     return [
@@ -63,6 +68,26 @@ def build_cases() -> list[Case]:
         case(
             "plain_language", "syn_one_big",
             "My manager wants to know if anything structural happened in syn_one_big. Short answer please.",
+        ),
+        # --- Method choice: the agent must pick the ONLINE tool for "now"
+        # questions and the MULTIVARIATE tool for "together" questions.
+        Case(
+            "now_recent_change",
+            "Is something changing right now in syn_recent_change? Has the latest data broken from its past?",
+            ex["syn_recent_change"], None, ex["syn_recent_change"].true_changepoints,
+            expected_tool="detect_recent_change", expect_recent=True,
+        ),
+        Case(
+            "now_no_recent_change",
+            "Is anything changing at the moment in syn_one_big, or is the current regime long-established?",
+            ex["syn_one_big"], None, [],
+            expected_tool="detect_recent_change", expect_recent=False,
+        ),
+        Case(
+            "joint_change",
+            "Did the series syn_mv_1, syn_mv_2, syn_mv_3 and syn_mv_4 change together? When?",
+            ex["syn_mv_1"], 1, ex["syn_mv_1"].true_changepoints,
+            expected_tool="detect_joint_changepoints",
         ),
         Case("missing_series", q("syn_does_not_exist"), expect_error=True),
         # Out of scope. The first three are caught by the regex guardrail; the

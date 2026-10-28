@@ -12,11 +12,15 @@ One call to `MonitoringAgent.ask(question)` does this:
   │    │                                                                       │
   │    no (final answer)                                                       │
   │    ▼                                                                       │
-  │ [grounding_check] ── unsupported numbers? ──yes── ask LLM to fix (max 2x) ─┘
-  │    │
+  │ [grounding_check + direction_check] ── problems? ──yes── ask LLM to fix ───┘
+  │    │                                                    (max 2 times)
   │    ok
   │    ▼
-  └ AgentResult(answer, verdict, tool calls, tokens, latency, guardrail log)
+  └ AgentResult(answer, verdict, tool calls, guardrail log, tokens, latency)
+
+The LLM's main decision is WHICH detection method fits the question:
+offline (history), online (is it changing now?) or multivariate (did several
+series change together?). The evaluation checks that choice.
 
 The loop is written by hand (no agent framework) so every step is visible and
 can be logged, tested and evaluated.
@@ -30,28 +34,43 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from .guardrails import REFUSAL_TEXT, grounding_check, parse_verdict, scope_check
+from .guardrails import REFUSAL_TEXT, direction_check, grounding_check, parse_verdict, scope_check
 from .tools import TOOL_SCHEMAS, Toolbox
 
 DEFAULT_MODEL = os.environ.get("BCPD_AGENT_MODEL", "claude-haiku-5-5")
 
-SYSTEM_PROMPT = """You are a monitoring analyst. You answer questions about whether and when a \
+SYSTEM_PROMPT = """You are a monitoring analyst. You answer questions about whether and when \
 time series changed regime, using ONLY the tools provided.
 
+Choose the method that fits the question:
+- History ("did it change, when, how many times?"): load_series, then detect_changepoints (offline).
+- Now ("is something changing at the moment, in the latest data, recently?"): load_series, then \
+detect_recent_change (online).
+- Several series together ("did these change together / at the same time?"): \
+detect_joint_changepoints with all the series ids (it loads them itself).
+
 Rules:
-1. Always call load_series first, then detect_changepoints. Never guess.
-2. Every number and date you write must be copied from a tool result. Do not compute new numbers \
-(no differences, ratios or averages of your own). Probabilities may be written as percentages.
-3. Describe uncertainty: give the 90% interval for each change and the probability of the number \
-of changes.
+1. Never guess. Every number and date you write must be copied from a tool result. Do not compute \
+new numbers (no differences, ratios or averages of your own). Probabilities may be written as \
+percentages.
+2. Describe uncertainty: give the 90% interval for each date and the relevant probability.
+3. When you say a level rose or fell, it must match the sign of change_in_mean in the tool result.
 4. If a tool returns an error, say so plainly and do not invent results.
 5. Refuse questions outside this scope: investment advice, forecasts of the future, personal data.
 6. Keep the answer short: 3-6 sentences for a manager who is not a statistician.
 7. End EVERY answer with a JSON block in exactly this format:
 ```json
-{"refused": false, "series_id": "<id or null>", "n_changepoints": <int or null>, "changepoints": ["YYYY-MM", ...]}
+{"refused": false, "method": "offline|online|multivariate|null", "series_id": "<id, comma-separated ids, or null>", "n_changepoints": <int or null>, "changepoints": ["YYYY-MM", ...], "recent_change": <true, false or null>}
 ```
-For a refusal use {"refused": true, "series_id": null, "n_changepoints": null, "changepoints": []}."""
+- offline / multivariate: n_changepoints = most probable number, changepoints = their dates, recent_change = null.
+- online: recent_change = true if the current regime most likely started within the window, else false; \
+changepoints = [the current regime start date] if recent_change is true, else []; n_changepoints = null.
+- refusal: {"refused": true, "method": null, "series_id": null, "n_changepoints": null, "changepoints": [], "recent_change": null}."""
+
+REFUSAL_VERDICT = (
+    '\n```json\n{"refused": true, "method": null, "series_id": null, "n_changepoints": null, '
+    '"changepoints": [], "recent_change": null}\n```'
+)
 
 
 @dataclass
@@ -61,9 +80,11 @@ class AgentResult:
     verdict: dict[str, Any] | None
     refused_by_guardrail: bool = False
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
-    # Grounding results: unsupported numbers in the FIRST draft and in the FINAL answer.
+    # Guardrail results on the FIRST draft (raw model behaviour) and the FINAL answer.
     first_draft_unsupported: list[str] = field(default_factory=list)
     final_unsupported: list[str] = field(default_factory=list)
+    first_draft_direction_errors: list[str] = field(default_factory=list)
+    final_direction_errors: list[str] = field(default_factory=list)
     regenerations: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -100,9 +121,7 @@ class MonitoringAgent:
         # ---- Guardrail 1: scope, before spending any tokens.
         reason = scope_check(question)
         if reason:
-            result.answer = REFUSAL_TEXT.format(reason=reason) + (
-                '\n```json\n{"refused": true, "series_id": null, "n_changepoints": null, "changepoints": []}\n```'
-            )
+            result.answer = REFUSAL_TEXT.format(reason=reason) + REFUSAL_VERDICT
             result.verdict = parse_verdict(result.answer)
             result.refused_by_guardrail = True
             result.latency_s = time.perf_counter() - t0
@@ -143,26 +162,37 @@ class MonitoringAgent:
             # ---- No tool requested: this is a (draft) final answer.
             answer = "".join(b.text for b in resp.content if b.type == "text")
 
-            # ---- Guardrail 2: grounding. Every number must come from a tool.
-            unsupported = grounding_check(answer, tool_outputs)
-            if result.regenerations == 0:  # first draft: this is the "raw" hallucination rate
+            # ---- Guardrails 2 and 2b: numbers come from tools; rise/fall matches the sign.
+            unsupported = grounding_check(answer, tool_outputs, question)
+            wrong_direction = direction_check(answer, tool_outputs)
+            if result.regenerations == 0:  # first draft: the "raw" error rates
                 result.first_draft_unsupported = unsupported
-            if unsupported and result.regenerations < self.max_regenerations:
+                result.first_draft_direction_errors = wrong_direction
+            if (unsupported or wrong_direction) and result.regenerations < self.max_regenerations:
                 result.regenerations += 1
+                problems = []
+                if unsupported:
+                    problems.append(
+                        f"These numbers or dates do not appear in any tool result: {unsupported}."
+                    )
+                if wrong_direction:
+                    problems.append(
+                        "These sentences say rose/fell in the opposite direction to change_in_mean "
+                        f"in the tool result: {wrong_direction}."
+                    )
                 messages.append(
                     {
                         "role": "user",
-                        "content": (
-                            "Grounding check failed. These numbers or dates in your answer do not "
-                            f"appear in any tool result: {unsupported}. Rewrite the answer using only "
-                            "values copied from tool results, keeping the JSON block at the end."
-                        ),
+                        "content": "Guardrail check failed. " + " ".join(problems)
+                        + " Rewrite the answer using only values copied from tool results, "
+                        "keeping the JSON block at the end.",
                     }
                 )
                 continue
 
             result.answer = answer
             result.final_unsupported = unsupported
+            result.final_direction_errors = wrong_direction
             break
         else:
             result.answer = "Stopped: the agent reached its step limit without a final answer."
