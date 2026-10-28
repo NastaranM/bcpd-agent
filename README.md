@@ -9,6 +9,8 @@ question ─► scope guardrail ─► Claude ─ chooses a method ─► offlin
              grounding + direction guardrails ─► human approval ─► report + audit log
 ```
 
+![The web interface: question, chart from the tool output, answer, guardrail status and human approval](docs/screenshot.png)
+
 ## Why
 
 LLMs are good at explaining and choosing, and bad at arithmetic. So this agent never does statistics itself. It decides which method fits the question, then reports only what the tools computed. Deterministic checks reject any number or date that no tool produced, and any "rose" or "fell" that contradicts the computed change. The same control pattern applies to any model-monitoring workflow in a regulated setting.
@@ -31,8 +33,9 @@ The evaluation checks that the agent picks the right one.
 | Agent loop | `src/bcpd_agent/agent.py` | Hand-written tool-calling loop with step limits, token and latency logging |
 | Guardrails | `src/bcpd_agent/guardrails.py` | Scope check, grounding check (numbers and dates), direction check, structured verdict, human approval |
 | Audit log | `src/bcpd_agent/audit.py` | One JSON record per question: tools, inputs, outputs, guardrail results, approval |
+| Interface | `app.py`, `src/bcpd_agent/plots.py` | Streamlit page: question, chart drawn from the tool output, answer, agent trace, Approve / Reject |
 | Evaluation | `evals/` | 18 cases with known truth: planted changes, recent vs old changes, a joint change, missing data, out-of-scope questions |
-| Tests | `tests/` | 19 tests that run offline with a scripted fake model, so no API key is needed |
+| Tests | `tests/` | 23 tests that run offline with a scripted fake model, so no API key is needed |
 
 ## Evaluation design
 
@@ -75,6 +78,8 @@ python -m venv .venv && source .venv/bin/activate      # Windows Git Bash: sourc
 pip install -e ".[dev]"
 pytest                                                  # offline, no key needed
 python -m evals.run_eval --fake                         # offline smoke test of the eval
+
+pip install -e ".[ui]" && streamlit run app.py         # web interface (has an offline demo mode)
 
 export ANTHROPIC_API_KEY=...
 bcpd-agent "Did the series syn_two_shifts change regime? When?"

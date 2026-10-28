@@ -80,11 +80,14 @@ bcpd-agent/
 │   ├── agent.py        the system prompt and the tool-calling loop
 │   ├── audit.py        the audit log (logs/audit.jsonl)
 │   ├── cli.py          the `bcpd-agent` command
+│   ├── plots.py        charts for the interface, drawn from the tool output
 │   └── fake_llm.py     scripted stand-in for the API, for tests and offline runs
 ├── evals/
 │   ├── cases.py        18 questions with known answers
 │   └── run_eval.py     runs them, scores them, writes results/*.json and *.md
-├── tests/test_agent.py 19 offline tests (pytest)
+├── app.py              the web interface (Streamlit)
+├── docs/screenshot.png the interface, shown in the README
+├── tests/test_agent.py 23 offline tests (pytest)
 ├── .github/workflows/ci.yml   automatic tests + evaluation gate on GitHub
 ├── Dockerfile          container (deployment)
 ├── README.md           the public, short description
@@ -126,7 +129,7 @@ export ANTHROPIC_API_KEY="..."               # paste with Shift+Insert (unless s
 Check everything works without a key:
 
 ```bash
-pytest                            # expect: 19 passed
+pytest                            # expect: 23 passed
 python -m evals.run_eval --fake   # expect: 16 PASS, 2 FAIL (explained in section 6)
 ```
 
@@ -140,6 +143,14 @@ bcpd-agent "Did syn_mv_1, syn_mv_2, syn_mv_3 and syn_mv_4 change together?"     
 bcpd-agent "Did the US credit card charge-off rate (CORCCACBS) change regime since 2000?"   # real data
 bcpd-agent "Should I buy bank shares?"                                           # refused before the model
 ```
+
+**The web interface** (install it once with `pip install -e ".[ui]"`):
+
+```bash
+streamlit run app.py
+```
+
+A page opens in your browser. Type a question or click an example in the sidebar. You get the chart (drawn from the tool's output, so it shows exactly what the guardrails checked against), the answer, a status line (method, guardrails, rewrites), Approve / Reject buttons, and an expandable "What the agent did" panel with every tool call, the guardrail results, tokens and latency. If no API key is set, it starts in **offline demo** mode with the fake model, which is handy for showing the interface without spending anything. Stop the server with Ctrl+C in Git Bash.
 
 The real evaluation:
 

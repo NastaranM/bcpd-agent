@@ -179,3 +179,27 @@ def test_typographic_minus_is_a_minus():
     tool = [{"changepoints": [{"regime_starts": "2011-04", "change_in_mean": -1.668}]}]
     assert grounding_check("In 2011-04 the mean changed by −1.668.", tool) == []
     assert grounding_check("In 2011-04 the mean changed by +1.668.", tool) == ["1.668"]  # wrong sign still caught
+
+
+# ------------------------------------------------- charts for the interface
+def test_charts_for_each_method():
+    from bcpd_agent.plots import figure_for
+
+    questions = {
+        "Did the series syn_two_shifts change regime?": 2,                 # offline: 2 panels
+        "Is something changing right now in syn_recent_change?": 1,       # online: 1 panel
+        "Did syn_mv_1, syn_mv_2, syn_mv_3 and syn_mv_4 change together?": 4,  # one row per series
+    }
+    for q, n_axes in questions.items():
+        tb = _full_toolbox()
+        res = MonitoringAgent(client=FakeClient(), model="fake", toolbox=tb).ask(q)
+        fig = figure_for(res, tb)
+        assert fig is not None and len(fig.axes) == n_axes
+
+
+def test_no_chart_for_refusal():
+    from bcpd_agent.plots import figure_for
+
+    tb = _full_toolbox()
+    res = MonitoringAgent(client=FakeClient(), model="fake", toolbox=tb).ask("Should I buy bank shares?")
+    assert figure_for(res, tb) is None

@@ -21,6 +21,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4"]
+# The web interface: pip install -e ".[ui]"  then  streamlit run app.py
+ui = ["streamlit>=1.30"]
 
 [project.scripts]
 # After `pip install -e .` you can run `bcpd-agent "your question"` in a terminal.
