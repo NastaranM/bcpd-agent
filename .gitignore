@@ -1,10 +1,9 @@
 .venv/
+/bcpd_agent/
 __pycache__/
 *.egg-info/
 .env
 reports/
 results/
 .pytest_cache/
-logs/
-logs/
 logs/
