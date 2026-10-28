@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bcpd-agent"
+version = "0.1.0"
+description = "A monitoring-analyst agent that finds regime changes in time series using exact Bayesian changepoint detection, with guardrails and an evaluation suite."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Nastaran Meftahi" }]
+dependencies = [
+    "anthropic>=0.40",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    # Your own package, installed straight from GitHub.
+    "bcpd @ git+https://github.com/NastaranM/bcpd-repo.git",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+# After `pip install -e .` you can run `bcpd-agent "your question"` in a terminal.
+bcpd-agent = "bcpd_agent.cli:main"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bcpd_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]

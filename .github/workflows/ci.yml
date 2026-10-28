@@ -1,0 +1,46 @@
+# Runs on every push. Stage 2 of the plan: evaluation as a gate.
+#
+# 1. Unit tests and the offline (fake-model) evaluation always run, for free.
+# 2. If the repository has an ANTHROPIC_API_KEY secret, the real evaluation
+#    also runs, and the build FAILS if any final answer contains an
+#    unsupported number (hallucination rate above 0).
+#
+# Add the secret in GitHub: Settings → Secrets and variables → Actions →
+# New repository secret → name ANTHROPIC_API_KEY.
+
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+      - run: python -m evals.run_eval --fake --max-hallucination-rate 0
+
+  eval:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]"
+      - name: Real evaluation (gate)
+        if: env.ANTHROPIC_API_KEY != ''
+        run: python -m evals.run_eval --max-hallucination-rate 0
+      - name: Keep the results
+        if: env.ANTHROPIC_API_KEY != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: results/
