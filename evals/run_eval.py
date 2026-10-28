@@ -37,6 +37,7 @@ from dataclasses import asdict
 from typing import Any
 
 from bcpd_agent.agent import DEFAULT_MODEL, MonitoringAgent
+from bcpd_agent.examples import register_examples
 from bcpd_agent.tools import Toolbox
 
 from .cases import DATE_TOLERANCE_MONTHS, Case, build_cases
@@ -151,9 +152,7 @@ def run(model: str, client: Any = None, out_dir: str = "results", verbose: bool 
     for case in build_cases():
         # A fresh toolbox per case: no state leaks between questions.
         tb = Toolbox(plot_dir=os.path.join(out_dir, "plots"))
-        for c in build_cases():
-            if c.series is not None:
-                tb.store.register_synthetic(c.series)
+        register_examples(tb.store)
         agent = MonitoringAgent(client=client, model=model, toolbox=tb)
         res = agent.ask(case.question)
         row = score_case(case, res)

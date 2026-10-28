@@ -83,3 +83,13 @@ def test_scope_guardrail_skips_the_model():
     agent = MonitoringAgent(client=FakeClient(), model="fake", toolbox=_toolbox())
     res = agent.ask("Should I buy Nordea shares based on syn_one_big?")
     assert res.refused_by_guardrail and res.input_tokens == 0
+
+
+def test_cli_toolbox_knows_example_series():
+    from bcpd_agent.examples import register_examples
+
+    tb = Toolbox(plot_dir="/tmp/bcpd-agent-test")
+    register_examples(tb.store)
+    assert tb.load_series("syn_two_shifts")["n_observations"] == 220
+    err = tb.run("load_series", {"series_id": "syn_typo"})["error"]
+    assert "Available:" in err and "syn_two_shifts" in err

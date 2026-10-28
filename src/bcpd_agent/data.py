@@ -67,7 +67,8 @@ class SeriesStore:
             s = self._synthetic[series_id]
         elif series_id.startswith("syn_"):
             # Never send test ids to FRED: fail clearly instead.
-            raise KeyError(f"Unknown synthetic series '{series_id}'.")
+            available = ", ".join(sorted(self._synthetic)) or "none"
+            raise KeyError(f"Unknown synthetic series '{series_id}'. Available: {available}.")
         else:
             s = fetch_fred(series_id)
         s = _slice(s, start, end)

@@ -67,6 +67,7 @@ bcpd-agent/
 │   ├── guardrails.py   scope check, grounding check, verdict parser, human approval
 │   ├── agent.py        the system prompt and the tool-calling loop
 │   ├── cli.py          the `bcpd-agent` command
+│   ├── examples.py     built-in test series (syn_one_big, syn_two_shifts, ...) with planted changes
 │   └── fake_llm.py     scripted stand-in for the API, for tests and offline runs
 ├── evals/
 │   ├── cases.py        15 questions with known answers

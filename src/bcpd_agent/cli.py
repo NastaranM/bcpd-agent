@@ -16,6 +16,7 @@ import json
 import os
 
 from .agent import DEFAULT_MODEL, MonitoringAgent
+from .examples import register_examples
 from .guardrails import ask_approval
 from .tools import Toolbox
 
@@ -28,7 +29,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--plot-dir", default="reports")
     args = p.parse_args(argv)
 
-    agent = MonitoringAgent(model=args.model, toolbox=Toolbox(plot_dir=args.plot_dir))
+    toolbox = Toolbox(plot_dir=args.plot_dir)
+    register_examples(toolbox.store)  # so questions about syn_* test series work
+    agent = MonitoringAgent(model=args.model, toolbox=toolbox)
     res = agent.ask(args.question)
 
     print("\nTool calls:")
