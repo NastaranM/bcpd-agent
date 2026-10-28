@@ -73,14 +73,41 @@ It also measures 90% interval coverage (calibration), refusal accuracy, fabricat
 
 ## Quick start
 
+**1. Get the code and install**
+
 ```bash
+git clone https://github.com/NastaranM/bcpd-agent.git
+cd bcpd-agent
 python -m venv .venv && source .venv/bin/activate      # Windows Git Bash: source .venv/Scripts/activate
-pip install -e ".[dev]"
-pytest                                                  # offline, no key needed
-python -m evals.run_eval --fake                         # offline smoke test of the eval
+pip install -e ".[dev,ui]"
+```
 
-pip install -e ".[ui]" && streamlit run app.py         # web interface (has an offline demo mode)
+The extras are optional:
 
+| Install | You get |
+|---|---|
+| `pip install -e .` | The agent and the `bcpd-agent` command |
+| `pip install -e ".[dev]"` | + pytest, to run the tests |
+| `pip install -e ".[ui]"` | + Streamlit, for the web interface |
+
+**2. Check it works offline (no API key, no cost)**
+
+```bash
+pytest
+python -m evals.run_eval --fake
+```
+
+**3. Web interface**
+
+```bash
+streamlit run app.py
+```
+
+It opens in your browser. Without an API key it starts in offline demo mode with a scripted model; with a key it uses Claude. Stop it with Ctrl+C.
+
+**4. Command line and evaluation with the real model**
+
+```bash
 export ANTHROPIC_API_KEY=...
 bcpd-agent "Did the series syn_two_shifts change regime? When?"
 bcpd-agent "Is something changing right now in syn_recent_change?"
